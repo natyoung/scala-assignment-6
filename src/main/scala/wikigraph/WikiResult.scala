@@ -1,6 +1,8 @@
 package wikigraph
 
-import scala.concurrent.{ ExecutionContext, Future }
+import scala.concurrent.{ExecutionContext, Future}
+import scala.util.{Success, Try}
+
 import wikigraph.errors.WikiError
 import wikigraph.errors.WikiException
 
@@ -42,7 +44,7 @@ case class WikiResult[A](value: Future[Either[Seq[WikiError], A]]):
     * @param b the computation to use in case of failure
     */
   def fallbackTo(that: => WikiResult[A])(using ExecutionContext): WikiResult[A] =
-    val f = this.value.flatMap {
+    val f: Future[Either[Seq[WikiError], A]] = this.value.flatMap {
       case Left(_)  => that.value
       case Right(_) => this.value
     }
@@ -56,7 +58,10 @@ case class WikiResult[A](value: Future[Either[Seq[WikiError], A]]):
     * Hint: Both Either and Future have a similar method
     */
   def map[B](f: A => B)(using ExecutionContext): WikiResult[B] =
-    ???
+    val futureB: Future[Either[Seq[WikiError], B]] = this.value.map {
+      (e: Either[Seq[WikiError], A]) => e.fold(l => Left(l), r => Right(f(r)))
+    }
+    WikiResult(futureB)
 
   /**
     * Use the result of this computation as an input for another asynchronous
@@ -69,7 +74,8 @@ case class WikiResult[A](value: Future[Either[Seq[WikiError], A]]):
     */
   def flatMap[B](f: A => WikiResult[B])(using ExecutionContext): WikiResult[B] = 
     val futureB: Future[Either[Seq[WikiError], B]] = value.flatMap {
-      ???
+      case Right(a) => f(a).value
+      case Left(error) => Future.successful[Either[Seq[WikiError], B]](Left(error))
     }
     WikiResult(futureB)
 
@@ -84,7 +90,13 @@ case class WikiResult[A](value: Future[Either[Seq[WikiError], A]]):
     */
   def zip[B](that: WikiResult[B])(using ExecutionContext): WikiResult[(A, B)] =
     def zipEithersAcc(a: Either[Seq[WikiError], A], b: Either[Seq[WikiError], B]): Either[Seq[WikiError], (A, B)] =
-      ???
+      (a, b) match {
+        case (Right(a), Right(b)) => Right((a, b))
+        case (Left(error), Right(b)) => Left(error)
+        case (Right(_), Left(error)) => Left(error)
+        case (Left(errorA), Left(errorB)) => Left(errorA ++ errorB)
+      }
+
     WikiResult(this.value.flatMap { thisEither =>
       that.value.map { thatEither =>
         zipEithersAcc(thisEither, thatEither)
@@ -141,6 +153,8 @@ object WikiResult:
     * empty, return a successful empty sequence.
     */
   def traverse[A, B](as: Seq[A])(f: A => WikiResult[B])(using ExecutionContext): WikiResult[Seq[B]] =
-    ???
+    as.map(f).foldLeft(WikiResult.successful[Seq[B]](Seq.empty[B]))((acc, el) => {
+      acc.zip(el.map(Seq(_))).map(e => e._1 ++ e._2)
+    })
 
 end WikiResult
