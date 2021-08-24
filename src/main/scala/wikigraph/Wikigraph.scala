@@ -21,7 +21,9 @@ final class Wikigraph(client: Wikipedia):
     * Hint: Use the methods that you implemented in WikiResult.
     */
   def namedLinks(of: ArticleId): WikiResult[Set[String]] =
-    ???
+    client.linksFrom(of).flatMap(articleIds => {
+      WikiResult.traverse[ArticleId, String](articleIds.toSeq)(client.nameOfArticle).map(e => e.toSet)
+    })
 
   /**
     * Computes the distance between two articles using breadth first search.
@@ -58,8 +60,25 @@ final class Wikigraph(client: Wikipedia):
       *        graph cycles
       * @param q the next nodes to visit and their distance from `start`
       */
-    def iter(visited: Set[ArticleId], q: Queue[(Int, ArticleId)]): WikiResult[Option[Int]] =
-      ???
+    def iter(visited: Set[ArticleId], q: Queue[(Int, ArticleId)]): WikiResult[Option[Int]] = {
+      if (q.isEmpty) return WikiResult.successful(None)
+
+      val ((depth, article), remaining) = q.dequeue
+      if (depth >= maxDepth) return WikiResult.successful(None)
+
+      client.linksFrom(article).flatMap(articleIds => {
+        if (articleIds.contains(target)) then WikiResult.successful(Some(depth))
+        else
+          iter(visited + article,
+            remaining.enqueueAll(
+              articleIds
+                .filterNot(articleId => visited.contains(articleId))
+                .map(articleId => (depth + 1, articleId))
+            )
+          )
+      }).fallbackTo(iter(visited + article, remaining))
+    }
+
     if start == target then WikiResult.successful(Some(0))
     else iter(Set(start), Queue(1->start))
 
@@ -76,6 +95,20 @@ final class Wikigraph(client: Wikipedia):
     * Hint: You should use the methods that you implemented on WikiResult as well as
     *       breadthFirstSearch
     */
-  def distanceMatrix(titles: List[String], maxDepth: Int = 50): WikiResult[Seq[(String, String, Option[Int])]] =
-    ???
+  def distanceMatrix(titles: List[String], maxDepth: Int = 50): WikiResult[Seq[(String, String, Option[Int])]] = {
+    val articles = for {
+      a <- titles
+      b <- titles
+      if a != b
+    } yield (a, b)
+
+    WikiResult.traverse[(String, String), (String, String, Option[Int])](articles) { (titleA, titleB) =>
+      client.searchId(titleA).zip(client.searchId(titleB)).flatMap { (startId, targetId) =>
+        breadthFirstSearch(startId, targetId, maxDepth).flatMap { distance =>
+          WikiResult.successful(titleA, titleB, distance)
+        }
+      }
+    }
+  }
+
 end Wikigraph

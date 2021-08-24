@@ -153,8 +153,8 @@ object WikiResult:
     * empty, return a successful empty sequence.
     */
   def traverse[A, B](as: Seq[A])(f: A => WikiResult[B])(using ExecutionContext): WikiResult[Seq[B]] =
-    as.map(f).foldLeft(WikiResult.successful[Seq[B]](Seq.empty[B]))((acc, el) => {
-      acc.zip(el.map(Seq(_))).map(e => e._1 ++ e._2)
+    as.map(f).foldLeft(WikiResult.successful[Seq[B]](Seq.empty[B]))((acc, a) => {
+      acc.zip(a.map(Seq(_))).map(e => e._1 ++ e._2)
     })
 
 end WikiResult
